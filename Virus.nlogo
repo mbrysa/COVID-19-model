@@ -1,16 +1,25 @@
+breed [age-1s age-1]
+breed [age-2s age-2]
+breed [age-3s age-3]
+breed [age-4s age-4]
+breed [age-5s age-5]
+
 turtles-own
-  [ sick?                ;; if true, the turtle is infectious
+  [ sick-level                ;; if true, the turtle is infectious
     remaining-immunity   ;; how many weeks of immunity the turtle has left
     sick-time            ;; how long, in weeks, the turtle has been infectious
-    age ]                ;; how many weeks old the turtle is
+    severity
+    ring-position
+     ]                ;; how many weeks old the turtle is
 
 globals
   [ %infected            ;; what % of the population is infectious
     %immune              ;; what % of the population is immune
-    lifespan             ;; the lifespan of a turtle
-    chance-reproduce     ;; the probability of a turtle generating an offspring each tick
-    carrying-capacity    ;; the number of turtles that can be in the world at one time
-    immunity-duration ]  ;; how many weeks immunity lasts
+    dead
+    recovered
+    sum-sick-time
+    total-initial-population
+    ]  ;; how many weeks immunity lasts
 
 ;; The setup is divided into four procedures
 to setup
@@ -25,40 +34,70 @@ end
 ;; We create a variable number of turtles of which 10 are infectious,
 ;; and distribute them randomly
 to setup-turtles
-  create-turtles number-people
+  create-age-1s population-1
     [ setxy random-xcor random-ycor
-      set age random lifespan
+      set severity severity-1
+      ]
+
+  create-age-2s population-2
+    [ setxy random-xcor random-ycor
+      set severity severity-2
+      ]
+
+  create-age-3s population-3
+    [ setxy random-xcor random-ycor
+      set severity severity-3
+      ]
+
+  create-age-3s population-4
+    [ setxy random-xcor random-ycor
+      set severity severity-4
+      ]
+
+  create-age-3s population-5
+    [ setxy random-xcor random-ycor
+      set severity severity-5
+      ]
+
+  ask turtles
+    [ setxy random-xcor random-ycor
       set sick-time 0
       set remaining-immunity 0
-      set size 1.5  ;; easier to see
+      set sick-level 0
+      set ring-position random-float 1
       get-healthy ]
-  ask n-of 10 turtles
+
+  ask n-of seed-infected turtles
     [ get-sick ]
+
+  set total-initial-population count turtles
 end
 
 to get-sick ;; turtle procedure
-  set sick? true
+  set sick-level 1
   set remaining-immunity 0
 end
 
 to get-healthy ;; turtle procedure
-  set sick? false
+  set sick-level 0
   set remaining-immunity 0
   set sick-time 0
 end
 
 to become-immune ;; turtle procedure
-  set sick? false
+  set sum-sick-time sum-sick-time + sick-time
+  set recovered recovered + 1
+  set sick-level 0
   set sick-time 0
   set remaining-immunity immunity-duration
 end
 
 ;; This sets up basic constants of the model.
 to setup-constants
-  set lifespan 50 * 52      ;; 50 times 52 weeks = 50 years = 2600 weeks old
-  set carrying-capacity 300
-  set chance-reproduce 1
-  set immunity-duration 52
+  set dead 0
+  set recovered 0
+  set sum-sick-time 0
+  ;;set immunity-duration 52
 end
 
 to go
@@ -66,7 +105,7 @@ to go
     get-older
     move
     if sick? [ recover-or-die ]
-    ifelse sick? [ infect ] [ reproduce ]
+    if sick? [ infect ]
   ]
   update-global-variables
   update-display
@@ -89,8 +128,6 @@ end
 to get-older ;; turtle procedure
   ;; Turtles die of old age once their age exceeds the
   ;; lifespan (set at 50 years in this model).
-  set age age + 1
-  if age > lifespan [ die ]
   if immune? [ set remaining-immunity remaining-immunity - 1 ]
   if sick? [ set sick-time sick-time + 1 ]
 end
@@ -99,38 +136,95 @@ end
 to move ;; turtle procedure
   rt random 100
   lt random 100
-  fd 1
+
+  fd (ifelse-value
+    icu-sick?
+    [ 0 ]
+    (mild-sick? and (ring-position < quarantine-mild-ratio / 100)) or (medium-sick? and (ring-position < quarantine-medium-ratio / 100))
+    [ quarantine-speed ]
+    wfh?
+    [ wfh-speed]
+    [ normal-speed ]
+    )
 end
 
 ;; If a turtle is sick, it infects other turtles on the same patch.
 ;; Immune turtles don't get sick.
 to infect ;; turtle procedure
-  ask other turtles-here with [ not sick? and not immune? ]
+  if sick-level < 3
+  [ ask other turtles-here with [ not sick? and not immune? ]
     [ if random-float 100 < infectiousness
-      [ get-sick ] ]
+      [ get-sick ] ] ]
 end
 
 ;; Once the turtle has been sick long enough, it
 ;; either recovers (and becomes immune) or it dies.
 to recover-or-die ;; turtle procedure
-  if sick-time > duration                        ;; If the turtle has survived past the virus' duration, then
-    [ ifelse random-float 100 < chance-recover   ;; either recover or die
-      [ become-immune ]
-      [ die ] ]
-end
+  let prob-next-level 0
+  let prob-recover 0
+  (ifelse
+    sick-level = 1
+    [ set prob-next-level (severity * 0.2)
+      set prob-recover (1 / severity * 0.01)  ]
+    sick-level = 2
+    [ set prob-next-level (severity * 0.1)
+      set prob-recover (1 / severity * 0.01)
+      if not icu-beds-available?
+        [ set sick-level 4 ]
+    ]
+    sick-level = 3
+    [ set prob-next-level (severity * 0.1)
+      set prob-recover (1 / severity * 0.01) ])
 
-;; If there are less turtles than the carrying-capacity
-;; then turtles can reproduce.
-to reproduce
-  if count turtles < carrying-capacity and random-float 100 < chance-reproduce
-    [ hatch 1
-      [ set age 1
-        lt 45 fd 1
-        get-healthy ] ]
+  let rnd random-float 1
+
+  (ifelse
+    rnd < prob-next-level
+    [ set sick-level sick-level + 1 ]
+    rnd - prob-next-level < prob-recover
+    [ become-immune ]
+  )
+
+  if sick-level > 3
+    [ set dead dead + 1
+      die ]
 end
 
 to-report immune?
   report remaining-immunity > 0
+end
+
+to-report sick?
+  report sick-level > 0
+end
+
+to-report mild-sick?
+  report sick-level = 1
+end
+
+to-report medium-sick?
+  report sick-level = 2
+end
+
+to-report icu-sick?
+  report sick-level = 3
+end
+
+to-report wfh?
+  let ratio 0
+  (ifelse
+    is-age-1? self [ set ratio wfh-ratio-1 ]
+    is-age-2? self [ set ratio wfh-ratio-2 ]
+    is-age-3? self [ set ratio wfh-ratio-3 ]
+    is-age-4? self [ set ratio wfh-ratio-4 ]
+    is-age-5? self [ set ratio wfh-ratio-5 ]
+    )
+  set ratio ratio / 100
+  report ring-position < ratio
+end
+
+to-report icu-beds-available?
+  report (count turtles with [icu-sick?]) < icu-beds
 end
 
 to startup
@@ -144,11 +238,11 @@ end
 GRAPHICS-WINDOW
 280
 10
-778
-509
+898
+629
 -1
 -1
-14.0
+10.0
 1
 10
 1
@@ -158,10 +252,10 @@ GRAPHICS-WINDOW
 1
 1
 1
--17
-17
--17
-17
+-30
+30
+-30
+30
 1
 1
 1
@@ -170,44 +264,14 @@ ticks
 
 SLIDER
 40
-155
-234
-188
-duration
-duration
-0.0
-99.0
-20.0
-1.0
-1
-weeks
-HORIZONTAL
-
-SLIDER
-40
-121
-234
-154
-chance-recover
-chance-recover
-0.0
-99.0
-75.0
-1.0
-1
-%
-HORIZONTAL
-
-SLIDER
-40
 87
-234
+215
 120
 infectiousness
 infectiousness
 0.0
 99.0
-65.0
+99.0
 1.0
 1
 %
@@ -248,15 +312,15 @@ NIL
 0
 
 PLOT
-15
-375
-267
-539
+280
+635
+900
+995
 Populations
-weeks
+days
 people
 0.0
-52.0
+180.0
 0.0
 200.0
 true
@@ -267,27 +331,15 @@ PENS
 "immune" 1.0 0 -7500403 true "" "plot count turtles with [ immune? ]"
 "healthy" 1.0 0 -10899396 true "" "plot count turtles with [ not sick? and not immune? ]"
 "total" 1.0 0 -13345367 true "" "plot count turtles"
-
-SLIDER
-40
-10
-234
-43
-number-people
-number-people
-10
-carrying-capacity
-150.0
-1
-1
-NIL
-HORIZONTAL
+"dead" 1.0 0 -16777216 true "" "plot dead"
+"icu" 1.0 0 -955883 true "" "plot count turtles with [ icu-sick? ]"
+"icu-beds" 1.0 0 -3844592 true "" "plot icu-beds"
 
 MONITOR
 28
-328
+648
 103
-373
+693
 NIL
 %infected
 1
@@ -296,9 +348,9 @@ NIL
 
 MONITOR
 105
-328
+648
 179
-373
+693
 NIL
 %immune
 1
@@ -307,24 +359,430 @@ NIL
 
 MONITOR
 181
-329
+649
 255
-374
-years
-ticks / 52
+694
+days
+ticks
 1
 1
 11
 
 CHOOSER
-65
-195
-210
-240
+20
+975
+165
+1020
 turtle-shape
 turtle-shape
 "person" "circle"
 0
+
+SLIDER
+40
+125
+215
+158
+immunity-duration
+immunity-duration
+0
+1000
+1000.0
+1
+1
+days
+HORIZONTAL
+
+TEXTBOX
+55
+1055
+205
+1073
+Age 0-25
+12
+0.0
+1
+
+SLIDER
+45
+1085
+215
+1118
+population-1
+population-1
+0
+1000
+168.0
+1
+1
+people
+HORIZONTAL
+
+SLIDER
+30
+600
+202
+633
+icu-beds
+icu-beds
+0
+100
+15.0
+1
+1
+beds
+HORIZONTAL
+
+SLIDER
+910
+90
+1140
+123
+quarantine-speed
+quarantine-speed
+0
+1
+0.0
+0.1
+1
+NIL
+HORIZONTAL
+
+TEXTBOX
+255
+1055
+405
+1073
+Age 26-45
+12
+0.0
+1
+
+TEXTBOX
+465
+1055
+615
+1073
+Age 46-65
+12
+0.0
+1
+
+TEXTBOX
+670
+1055
+820
+1073
+Age 66-75
+12
+0.0
+1
+
+TEXTBOX
+875
+1055
+1025
+1073
+Age 76+
+12
+0.0
+1
+
+SLIDER
+45
+1120
+215
+1153
+wfh-ratio-1
+wfh-ratio-1
+0
+100
+96.0
+1
+1
+%
+HORIZONTAL
+
+SLIDER
+45
+1155
+215
+1188
+severity-1
+severity-1
+0
+1
+0.11
+0.01
+1
+NIL
+HORIZONTAL
+
+SLIDER
+250
+1085
+425
+1118
+population-2
+population-2
+0
+1000
+269.0
+1
+1
+people
+HORIZONTAL
+
+SLIDER
+250
+1120
+425
+1153
+wfh-ratio-2
+wfh-ratio-2
+0
+100
+32.0
+1
+1
+%
+HORIZONTAL
+
+SLIDER
+250
+1155
+425
+1188
+severity-2
+severity-2
+0
+1
+0.19
+0.01
+1
+NIL
+HORIZONTAL
+
+SLIDER
+40
+5
+212
+38
+seed-infected
+seed-infected
+0
+100
+17.0
+1
+1
+NIL
+HORIZONTAL
+
+MONITOR
+30
+700
+212
+745
+Average recovery time
+sum-sick-time / recovered
+17
+1
+11
+
+SLIDER
+910
+130
+1140
+163
+wfh-speed
+wfh-speed
+0
+1
+0.2
+0.1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+460
+1085
+630
+1118
+population-3
+population-3
+0
+1000
+258.0
+1
+1
+people
+HORIZONTAL
+
+SLIDER
+460
+1120
+630
+1153
+wfh-ratio-3
+wfh-ratio-3
+0
+100
+33.0
+1
+1
+%
+HORIZONTAL
+
+SLIDER
+460
+1155
+630
+1188
+severity-3
+severity-3
+0
+1
+0.25
+0.01
+1
+NIL
+HORIZONTAL
+
+SLIDER
+665
+1085
+835
+1118
+population-4
+population-4
+0
+1000
+213.0
+1
+1
+people
+HORIZONTAL
+
+SLIDER
+665
+1120
+835
+1153
+wfh-ratio-4
+wfh-ratio-4
+0
+100
+77.0
+1
+1
+%
+HORIZONTAL
+
+SLIDER
+665
+1155
+835
+1188
+severity-4
+severity-4
+0
+1
+0.34
+0.01
+1
+NIL
+HORIZONTAL
+
+SLIDER
+870
+1085
+1040
+1118
+population-5
+population-5
+0
+1000
+154.0
+1
+1
+people
+HORIZONTAL
+
+SLIDER
+870
+1120
+1040
+1153
+wfh-ratio-5
+wfh-ratio-5
+0
+100
+95.0
+1
+1
+%
+HORIZONTAL
+
+SLIDER
+870
+1155
+1040
+1188
+severity-5
+severity-5
+0
+1
+0.5
+0.01
+1
+NIL
+HORIZONTAL
+
+SLIDER
+910
+10
+1140
+43
+quarantine-mild-ratio
+quarantine-mild-ratio
+0
+100
+76.0
+1
+1
+%
+HORIZONTAL
+
+SLIDER
+910
+45
+1140
+78
+quarantine-medium-ratio
+quarantine-medium-ratio
+0
+100
+95.0
+1
+1
+%
+HORIZONTAL
+
+SLIDER
+910
+170
+1140
+203
+normal-speed
+normal-speed
+0
+2
+0.8
+0.1
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
@@ -738,6 +1196,85 @@ NetLogo 6.1.1
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@
+<experiments>
+  <experiment name="experiment" repetitions="5" runMetricsEveryStep="false">
+    <setup>setup</setup>
+    <go>go</go>
+    <exitCondition>ticks &gt; 180</exitCondition>
+    <metric>dead</metric>
+    <enumeratedValueSet variable="immunity-duration">
+      <value value="1000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="population-3">
+      <value value="529"/>
+    </enumeratedValueSet>
+    <steppedValueSet variable="quarantine-mild-ratio" first="0" step="5" last="100"/>
+    <enumeratedValueSet variable="wfh-ratio-4">
+      <value value="55"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="seed-infected">
+      <value value="59"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="wfh-speed">
+      <value value="0.3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="wfh-ratio-5">
+      <value value="57"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="icu-beds">
+      <value value="45"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="population-4">
+      <value value="385"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="severity-1">
+      <value value="0.11"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="population-5">
+      <value value="182"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="severity-2">
+      <value value="0.22"/>
+    </enumeratedValueSet>
+    <steppedValueSet variable="quarantine-medium-ratio" first="90" step="5" last="100"/>
+    <enumeratedValueSet variable="severity-3">
+      <value value="0.3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="turtle-shape">
+      <value value="&quot;person&quot;"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="severity-4">
+      <value value="0.66"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="wfh-ratio-1">
+      <value value="15"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="infectiousness">
+      <value value="81"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="normal-speed">
+      <value value="1.8"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="wfh-ratio-2">
+      <value value="25"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="population-1">
+      <value value="245"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="wfh-ratio-3">
+      <value value="30"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="population-2">
+      <value value="369"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="severity-5">
+      <value value="0.72"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="quarantine-speed">
+      <value value="0.1"/>
+    </enumeratedValueSet>
+  </experiment>
+</experiments>
 @#$#@#$#@
 @#$#@#$#@
 default
