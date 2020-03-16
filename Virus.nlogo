@@ -109,6 +109,8 @@ to go
   ]
   update-global-variables
   update-display
+  if count turtles with [ sick? ] = 0
+  [ stop ]
   tick
 end
 
@@ -497,7 +499,7 @@ wfh-ratio-1
 wfh-ratio-1
 0
 100
-96.0
+0.0
 1
 1
 %
@@ -542,7 +544,7 @@ wfh-ratio-2
 wfh-ratio-2
 0
 100
-32.0
+0.0
 1
 1
 %
@@ -628,7 +630,7 @@ wfh-ratio-3
 wfh-ratio-3
 0
 100
-33.0
+0.0
 1
 1
 %
@@ -673,7 +675,7 @@ wfh-ratio-4
 wfh-ratio-4
 0
 100
-77.0
+0.0
 1
 1
 %
@@ -718,7 +720,7 @@ wfh-ratio-5
 wfh-ratio-5
 0
 100
-95.0
+0.0
 1
 1
 %
@@ -748,7 +750,7 @@ quarantine-mild-ratio
 quarantine-mild-ratio
 0
 100
-76.0
+66.0
 1
 1
 %
@@ -778,7 +780,7 @@ normal-speed
 normal-speed
 0
 2
-0.8
+1.0
 0.1
 1
 NIL
